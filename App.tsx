@@ -1,53 +1,37 @@
+// App.js
 import { Text, View, TextInput, Button } from 'react-native';
-import * as SQLite from 'expo-sqlite';
-import { useEffect, useState } from 'react';
-import { drizzle } from 'drizzle-orm/expo-sqlite';
+import { useState, useEffect } from 'react';
+import { useDatabaseMigration, getUsers, addUser, checkAndInsertUsers } from './services/dbService';
 import { usersTable } from './db/schema';
-import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
-import migrations from './drizzle/migrations';
-import { eq } from 'drizzle-orm';
-
-// 📌 Ouvre la base de données SQLite
-const expo = SQLite.openDatabaseSync('db.db');
-const db = drizzle(expo);
 
 export default function App() {
-  const { success, error } = useMigrations(db, migrations);
+  const { success, error } = useDatabaseMigration();
   const [items, setItems] = useState<typeof usersTable.$inferSelect[] | null>(null);
   const [name, setName] = useState('');
   const [age, setAge] = useState('');
   const [email, setEmail] = useState('');
 
-  console.log("Migration success:", success);
-  console.log("Migration error:", error);
+  useEffect(() => {
+    if (success) {
+      // Vérifie et insère les utilisateurs de test si nécessaire
+      checkAndInsertUsers().then(async () => {
+        const users = await getUsers();
+        setItems(users);
+      }).catch(err => {
+        console.error("Erreur lors de la mise à jour des utilisateurs:", err);
+      });
+    }
+  }, [success]);
 
+  const handleAddUser = async () => {
+    if (!name || !age || !email) {
+      console.error('❌ Veuillez remplir tous les champs.');
+      return;
+    }
 
-  const addUser = async () => {
     try {
-      if (!name || !age || !email) {
-        console.error('❌ Veuillez remplir tous les champs.');
-        return;
-      }
-
-      // Vérifie si l'email existe déjà dans la base de données
-      const existingUser = await db
-        .select()
-        .from(usersTable)
-        .where(eq(usersTable.email, email)) // Utilisation de eq pour comparer l'email
-        .limit(1);
-
-      if (existingUser.length > 0) {
-        console.error('❌ L\'email existe déjà.');
-        return;
-      }
-
-      const newUser = { name, age: parseInt(age), email };
-
-      await db.insert(usersTable).values([newUser]);
-
-      const users = await db.select().from(usersTable);
-      setItems(users);
-
+      const updatedUsers = await addUser(name, age, email);
+      setItems(updatedUsers);
       setName('');
       setAge('');
       setEmail('');
@@ -55,52 +39,6 @@ export default function App() {
       console.error("❌ Erreur lors de l'ajout de l'utilisateur:", err);
     }
   };
-
-
-  useEffect(() => {
-    if (!success) {
-      console.log("⏳ Migration en cours...");
-      return;
-    }
-
-    console.log("✅ Migration terminée !");
-
-    (async () => {
-      try {
-        await db.delete(usersTable);
-        
-        // Vérifier si les utilisateurs existent déjà avant d'insérer
-        const existingUsers = await db
-          .select()
-          .from(usersTable)
-          .where(
-            eq(usersTable.email, 'john@example.com')
-          );
-          
-        const existingUser2 = await db
-          .select()
-          .from(usersTable)
-          .where(
-            eq(usersTable.email, 'alice@example.com')
-          );
-
-        // Si les utilisateurs n'existent pas, on les insère
-        if (existingUsers.length === 0 && existingUser2.length === 0) {
-          await db.insert(usersTable).values([
-            { name: 'John', age: 30, email: 'john@example.com' },
-            { name: 'Alice', age: 25, email: 'alice@example.com' },
-          ]);
-
-          const users = await db.select().from(usersTable);
-          setItems(users);
-        } else {
-          console.log("⚠️ Un ou plusieurs utilisateurs existent déjà.");
-        }
-      } catch (err) {
-        console.error("❌ Erreur base de données:", err);
-      }
-    })();
-  }, [success]);
 
   // 📌 Gestion des erreurs de migration
   if (error) {
@@ -128,16 +66,7 @@ export default function App() {
   }
 
   return (
-    <View
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-      }}
-    >
+    <View style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', justifyContent: 'center' }}>
       <Text>👥 Liste des utilisateurs :</Text>
       {items.map((item) => (
         <Text key={item.id}>📧 {item.email}</Text>
@@ -165,8 +94,7 @@ export default function App() {
         style={{ margin: 10, padding: 10, borderWidth: 1, width: '80%' }}
       />
 
-      <Button title="Ajouter un utilisateur" onPress={addUser} />
-
+      <Button title="Ajouter un utilisateur" onPress={handleAddUser} />
     </View>
   );
 }
